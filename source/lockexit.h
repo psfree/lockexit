@@ -61,3 +61,5 @@ u8  appletGetFocusState(void);
 
 Result _appletDisallowToEnterSleep(void);
 Result _appletAllowToEnterSleep(void);
+
+Result appletBeginBlockingHomeButton(u64 val);

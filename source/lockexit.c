@@ -518,6 +518,42 @@ Result appletGetAppletResourceUserId(u64 *out) {
     return 0;
 }
 
+Result appletBeginBlockingHomeButton(u64 val) {
+    IpcCommand c;
+    ipcInitialize(&c);
+
+    if (!serviceIsActive(&g_appletSrv) || __nx_applet_type!=AppletType_Application)
+        return MAKERESULT(Module_Libnx, LibnxError_NotInitialized);
+
+    struct {
+        u64 magic;
+        u64 cmd_id;
+		u64 val;
+    } *raw;
+
+    raw = ipcPrepareHeader(&c, sizeof(*raw));
+
+    raw->magic = SFCI_MAGIC;
+    raw->cmd_id = 21;
+	raw->val = val;
+
+    Result rc = serviceIpcDispatch(&g_appletIFunctions);
+
+    if (R_SUCCEEDED(rc)) {
+        IpcParsedCommand r;
+        ipcParse(&r);
+
+        struct {
+            u64 magic;
+            u64 result;
+        } *resp = r.Raw;
+
+        rc = resp->result;
+    }
+
+    return rc;
+}
+
 Result appletGetDesiredLanguage(u64 *LanguageCode) {
     IpcCommand c;
     ipcInitialize(&c);
@@ -533,7 +569,7 @@ Result appletGetDesiredLanguage(u64 *LanguageCode) {
     raw = ipcPrepareHeader(&c, sizeof(*raw));
 
     raw->magic = SFCI_MAGIC;
-    raw->cmd_id = 21;
+    raw->cmd_id = 32;
 
     Result rc = serviceIpcDispatch(&g_appletIFunctions);
 

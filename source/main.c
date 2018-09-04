@@ -22,6 +22,11 @@ int main(int argc, char **argv)
 	
 	_appletDisallowToEnterSleep();
 	printf("sleep is disallowed\n");
+	
+	u64 value = 0;
+	rc= appletBeginBlockingHomeButton(value);
+	printf("appletBeginBlockingHomeButton: %x\n", rc);
+
     while(appletMainLoop())
     {
         //Scan all the inputs. This should be done once for each frame
