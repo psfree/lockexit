@@ -1,180 +1,63 @@
+/**
+ * @file applet.h
+ * @brief Applet (applet) service IPC wrapper.
+ * @author yellows8
+ * @copyright libnx Authors
+ */
+#pragma once
+#include <string.h>
 #include <switch.h>
-extern __attribute__((weak)) u32 __nx_applet_type;
-static Service g_appletSrv;
-static Service g_appletProxySession;
-static Service g_appletISelfController;
+#include "atomics.h"
 
-static Result _appletGetHandle(Service* srv, Handle* handle_out, u64 cmd_id) {
-    IpcCommand c;
-    ipcInitialize(&c);
+/// applet hook function.
+typedef void (*AppletHookFn)(AppletHookType hook, void* param);
 
-    struct {
-        u64 magic;
-        u64 cmd_id;
-    } *raw;
+/// applet hook cookie.
+typedef struct AppletHookCookie AppletHookCookie;
 
-    raw = ipcPrepareHeader(&c, sizeof(*raw));
+Result appletInitialize(void);
+void appletExit(void);
+Result appletGetAppletResourceUserId(u64 *out);
 
-    raw->magic = SFCI_MAGIC;
-    raw->cmd_id = cmd_id;
+void appletNotifyRunning(u8 *out);
+Result appletCreateManagedDisplayLayer(u64 *out);
 
-    Result rc = serviceIpcDispatch(srv);
+Result appletGetDesiredLanguage(u64 *LanguageCode);
 
-    if (R_SUCCEEDED(rc)) {
-        IpcParsedCommand r;
-        ipcParse(&r);
+/**
+ * @brief Controls whether screenshot-capture is allowed.
+ * @param val 0 = disable, 1 = enable.
+ */
+Result appletSetScreenShotPermission(s32 val);
 
-        struct {
-            u64 magic;
-            u64 result;
-        } *resp = r.Raw;
+Result appletSetScreenShotImageOrientation(s32 val);
 
-        rc = resp->result;
+/**
+ * @brief Processes the current applet status. Generally used within a main loop.
+ * @return Whether the application should continue running.
+ */
+bool appletMainLoop(void);
 
-        if (R_SUCCEEDED(rc)) {
-            *handle_out = r.Handles[0];
-        }
-    }
 
-    return rc;
-}
+/**
+ * @brief Sets up an applet status hook.
+ * @param cookie Hook cookie to use.
+ * @param callback Function to call when applet's status changes.
+ * @param param User-defined parameter to pass to the callback.
+ */
+void appletHook(AppletHookCookie* cookie, AppletHookFn callback, void* param);
 
-static Result _appletGetSession(Service* srv, Service* srv_out, u64 cmd_id) {
-    Result rc;
-    Handle handle;
+/**
+ * @brief Removes an applet status hook.
+ * @param cookie Hook cookie to remove.
+ */
+void appletUnhook(AppletHookCookie* cookie);
 
-    rc = _appletGetHandle(srv, &handle, cmd_id);
+/// These return state which is updated by appletMainLoop() when notifications are received.
+u8  appletGetOperationMode(void);
+u32 appletGetPerformanceMode(void);
+u8  appletGetFocusState(void);
 
-    if (R_SUCCEEDED(rc)) {
-        serviceCreate(srv_out, handle);
-    }
 
-    return rc;
-}
-
-static Result _appletGetSessionProxy(Service* srv_out, u64 cmd_id, Handle prochandle, u8 *AppletAttribute) {
-    IpcCommand c;
-    ipcInitialize(&c);
-
-    struct {
-        u64 magic;
-        u64 cmd_id;
-        u64 reserved;
-    } *raw;
-
-    ipcSendPid(&c);
-    ipcSendHandleCopy(&c, prochandle);
-    if (AppletAttribute) ipcAddSendBuffer(&c, AppletAttribute, 0x80, 0);
-
-    raw = ipcPrepareHeader(&c, sizeof(*raw));
-
-    raw->magic = SFCI_MAGIC;
-    raw->cmd_id = cmd_id;
-    raw->reserved = 0;
-
-    Result rc = serviceIpcDispatch(&g_appletSrv);
-
-    if (R_SUCCEEDED(rc)) {
-        IpcParsedCommand r;
-        ipcParse(&r);
-
-        struct {
-            u64 magic;
-            u64 result;
-        } *resp = r.Raw;
-
-        rc = resp->result;
-
-        if (R_SUCCEEDED(rc)) {
-            serviceCreate(srv_out, r.Handles[0]);
-        }
-    }
-
-    return rc;
-}
-
-Result initstuff(void) {
-	Result rc = 0;
-	
-    switch (__nx_applet_type) {
-    case AppletType_Default:
-        __nx_applet_type = AppletType_Application;
-        // Fallthrough.
-    case AppletType_Application:
-        rc = smGetService(&g_appletSrv, "appletOE");
-        break;
-    default:
-        rc = smGetService(&g_appletSrv, "appletAE");
-        break;
-    }
-
-    if (R_SUCCEEDED(rc)) {
-        #define AM_BUSY_ERROR 0x19280
-
-        do {
-            u32 cmd_id;
-
-            switch(__nx_applet_type) {
-            case AppletType_Application:       cmd_id = 0;   break;
-            case AppletType_SystemApplet:      cmd_id = 100; break;
-            case AppletType_LibraryApplet:     cmd_id = 200; break;
-            case AppletType_OverlayApplet:     cmd_id = 300; break;
-            case AppletType_SystemApplication: cmd_id = 350; break;
-            // TODO: Replace error code
-            default: fatalSimple(MAKERESULT(Module_Libnx, LibnxError_AppletCmdidNotFound));
-            }
-
-            rc = _appletGetSessionProxy(&g_appletProxySession, cmd_id, CUR_PROCESS_HANDLE, NULL);
-
-            if (rc == AM_BUSY_ERROR) {
-                svcSleepThread(10000000);
-            }
-
-        } while (rc == AM_BUSY_ERROR);
-    }
-	rc = _appletGetSession(&g_appletProxySession, &g_appletISelfController, 1);
-	return 0;
-}
-
-static Result _appletCmdNoIO(Service* session, u64 cmd_id) {
-    IpcCommand c;
-    ipcInitialize(&c);
-
-    struct {
-        u64 magic;
-        u64 cmd_id;
-    } *raw;
-
-    raw = ipcPrepareHeader(&c, sizeof(*raw));
-
-    raw->magic = SFCI_MAGIC;
-    raw->cmd_id = cmd_id;
-
-    Result rc = serviceIpcDispatch(session);
-
-    if (R_SUCCEEDED(rc)) {
-        IpcParsedCommand r;
-        ipcParse(&r);
-
-        struct {
-            u64 magic;
-            u64 result;
-        } *resp = r.Raw;
-
-        rc = resp->result;
-    }
-
-    return rc;
-}
-
-Result _appletSelfExit(void) {
-    return _appletCmdNoIO(&g_appletISelfController, 0);
-}
-
-Result _appletLockExit(void) {
-    return _appletCmdNoIO(&g_appletISelfController, 1);
-}
-
-Result _appletUnlockExit(void) {
-    return _appletCmdNoIO(&g_appletISelfController, 2);
-}
+Result _appletDisallowToEnterSleep(void);
+Result _appletAllowToEnterSleep(void);
